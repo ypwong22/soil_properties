@@ -1,5 +1,5 @@
 #!/bin/csh -f
-#SBATCH --time=12:00:00
+#SBATCH --time=24:00:00
 #SBATCH -J temp_gNATSGO_geotiff_REPLACE
 #SBATCH --nodes=1
 #SBATCH -q regular

@@ -1,6 +1,6 @@
 #!/bin/csh -f
 #SBATCH --time=2:00:00
-#SBATCH -J process_gNATSGO_downsize
+#SBATCH -J process_gNATSGO_1_chunkify
 #SBATCH --nodes=1
 #SBATCH -q regular
 #SBATCH --mem=64G
@@ -11,4 +11,4 @@
 
 echo `which python`
 cd ~/Git/soil_properties
-python process_gNATSGO_downsize.py
+python process_gNATSGO_1_chunkify.py
