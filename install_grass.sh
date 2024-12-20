@@ -91,6 +91,7 @@ sed 's:../.././install-sh:/global/u2/y/ywang11/local/grass-build/grass-8.3.1/ins
 make >& temp
 make install
 
+
 # Create environment setup script
 cat > $INSTALL_DIR/grass-env.sh << EOL
 #!/bin/bash
@@ -100,7 +101,7 @@ conda activate $CONDA_ENV_NAME
 
 # Set GRASS GIS environment variables
 export PATH=$INSTALL_DIR/bin:\$PATH
-export LD_LIBRARY_PATH=$INSTALL_DIR/lib:\$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=$HOME/local/libiconv/lib:$CONDA_PREFIX/lib:$INSTALL_DIR/lib:\$LD_LIBRARY_PATH
 export GRASSBIN=$INSTALL_DIR/bin/grass
 export PYTHONPATH=$INSTALL_DIR/lib/python3/dist-packages:\$PYTHONPATH
 export PROJ_LIB=$CONDA_PREFIX/share/proj
