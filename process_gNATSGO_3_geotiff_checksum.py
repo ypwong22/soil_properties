@@ -1,13 +1,13 @@
 """ Make a loop through all the files and check the size > 0"""
 import pandas as pd
 import os
+from constants import path_intrim
 
 n_chunks = 72
 
 var_list = ['sandtotal_r', 'silttotal_r', 'claytotal_r', 'om_r', 'ksat_r', 'brockdepmin']
 generated = pd.DataFrame(False, index = range(1, n_chunks+1), columns = var_list)
-path_folder = os.path.join(os.environ['PROJDIR'], 'DATA', 'Soil_Properties', 
-                           'gNATSGO_CONUS', 'mukey_divide')
+path_folder = os.path.join(path_intrim, 'gNATSGO')
 
 for var in var_list:
     for n in range(1, n_chunks+1):

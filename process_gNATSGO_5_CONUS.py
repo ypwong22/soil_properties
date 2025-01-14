@@ -35,7 +35,7 @@ def match_coords(src, target):
 
 def subset_target(var, ind_lat, ind_lon):
     """ Subset Lingcheng Li's file to the same area as gNATSGO """
-    ds = xr.open_dataset(os.path.join(path_data, 'global_cf_float', 
+    ds = xr.open_dataset(os.path.join(path_data, 'global_cf_float',
                                       f'PCT_{var}_10layer_1k_c230606.nc'))
 
     # Note: isel is used for integer-based indexing

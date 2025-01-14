@@ -9,14 +9,12 @@ import pandas as pd
 from tqdm import tqdm
 import tables
 from process_gNATSGO_utils import *
+from constants import path_intrim, path_data
 
 
-gdb_path = os.path.join(
-    os.environ['PROJDIR'], 'DATA', 'Soil_Properties', 'gNATSGO_CONUS', 'gNATSGO_CONUS.gdb'
-)
+gdb_path = os.path.join(path_data, 'gNATSGO_CONUS', 'gNATSGO_CONUS.gdb')
+dst_dir = os.path.join(path_intrim, 'gNATSGO')
 
-dst_dir = os.path.join(os.environ['PROJDIR'], 'DATA', 'Soil_Properties', 
-                       'gNATSGO_CONUS', 'mukey_divide')
 
 # The top 10 layers in ELM are hydrologically active
 # here are the layers' interface depths, unit: m

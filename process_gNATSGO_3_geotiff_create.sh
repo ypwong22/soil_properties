@@ -1,6 +1,6 @@
-create=1
-submit=1
-clean=0
+create=0
+submit=0
+clean=1
 
 if [[ $create == 1 ]]; then
   for chunk in {1..72}; do

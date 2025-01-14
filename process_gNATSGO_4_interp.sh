@@ -16,16 +16,16 @@ if [ ! -d "$GISDBASE/$LOCATION" ]; then
 fi
 
 # Set custom variables
-export INPUTDIR=${PROJDIR}/DATA/Soil_Properties/gNATSGO_CONUS/mukey_divide
+export INPUTDIR=${PROJDIR}/Soil_Properties/intermediate/gNATSGO/
 export NUM_BANDS=10
 
 # ~1 hour per variable per band
 export VARNAME=silttotal_r
-export band=9
 #for VARNAME in sandtotal_r silttotal_r claytotal_r om_r ksat_r brockdepmin
 #for band in $(seq 1 $NUM_BANDS); do
 
 for i in {1..10}; do
+    export band=${i}
     echo ${band}
 
     # Start GRASS session
@@ -72,7 +72,7 @@ r.out.gdal input="mosaic_${VARNAME}_${band}" \
 
 EOF
 
-    band=$((band + 1))
+    #band=$((band + 1))
 
 done
 #done

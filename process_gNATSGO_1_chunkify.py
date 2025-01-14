@@ -4,23 +4,19 @@ into smaller tiles for easier processing.
 
 Original shape: (96751, 153996)
 """
-from osgeo import ogr
 import os
 import geopandas as gpd
 import matplotlib.pyplot as plt
-import fiona
-import sys
 import rasterio as rio
 from rasterio.warp import calculate_default_transform, reproject, Resampling
 import numpy as np
+from constants import path_data, path_intrim
 
 row_splits = [16125] * 5 + [16126] # Sum = 96751
 col_splits = [12833] * 12  # Sum = 153996
 
-src_file = os.path.join(os.environ['PROJDIR'], 'DATA', 'Soil_Properties', 
-                        'FY2024_gNATSGO_mukey_grid', 'FY2024_gNATSGO_mukey_grid.tif')
-dst_dir = os.path.join(os.environ['PROJDIR'], 'Soil_Moisture_v2', 
-                       'intermediate', 'map_predictors', 'gNATSGO')
+src_file = os.path.join(path_data, 'FY2024_gNATSGO_mukey_grid', 'FY2024_gNATSGO_mukey_grid.tif')
+dst_dir = os.path.join(path_intrim, 'map_predictors', 'gNATSGO')
 
 # Div up the mukey file
 src = rio.open(src_file)
