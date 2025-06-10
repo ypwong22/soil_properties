@@ -75,8 +75,8 @@ for var in ['sandtotal_r', 'silttotal_r', 'claytotal_r', 'om_r', 'ksat_r']:
 print('brockdepmin', chunk)
 
 bedrock_data = []
-src = fiona.open(gdb_path, layer = 'muaggatt')
-for i, feat in enumerate(src):
+src_gdb = fiona.open(gdb_path, layer = 'muaggatt')
+for i, feat in enumerate(src_gdb):
     mukey = np.int32(feat['properties']['mukey'])
     brock = feat['properties']['brockdepmin']
     if not brock is None:
@@ -99,8 +99,10 @@ profile['compress'] = 'lzw'
 with rio.open(os.path.join(dst_dir, f'mukey_brockdepmin_{chunk}.tif'),
                 'w', **profile) as dst:
     data = np.full(mukey_map.shape, np.nan)
-    for mukey in tqdm( mukey_subset.index[mukey_subset['grid'] == chunk] ):
+    for mukey in tqdm( mukey_lkey.index[mukey_lkey[f'grid_{chunk}']] ):
         if not mukey in bedrock_data.index:
             continue
         data = np.where(mukey_map == mukey, bedrock_data.loc[mukey, 'brockdepmin'], data)
     dst.write(data, 1)
+
+src_gdb.close()
