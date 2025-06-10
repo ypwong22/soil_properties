@@ -2,11 +2,11 @@ import os
 import numpy as np
 
 path_data = os.path.join(
-    os.environ['PROJDIR'], 'Soil_Properties', 'data'
+    os.environ['SHARDIR'], 'Soil_Properties', 'data'
 )
 
 path_intrim = os.path.join(
-    os.environ['PROJDIR'], 'Soil_Properties', 'intermediate'
+    os.environ['SHARDIR'], 'Soil_Properties', 'intermediate'
 )
 
 elm_interface = np.array([0, 1.75, 4.51, 9.06, 16.55, 28.91, 49.29, 82.89, 138.28, 229.61, 380.19])
