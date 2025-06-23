@@ -1,18 +1,26 @@
-BOUNDS="-337500.000 1242500.000 152500.000 527500.000" # Example bounding box (homolosine) for Ghana
-ulx uly lrx lry
-CELL_SIZE="250 250"
+from osgeo import gdal,ogr,osr
 
-IGH="+proj=igh +lat_0=0 +lon_0=0 +datum=WGS84 +units=m +no_defs" # proj string for Homolosine projection
-SG_URL="/vsicurl?max_retry=3&retry_delay=1&list_dir=no&url=https://files.isric.org/soilgrids/latest/data"
+bb = (-337500.000,1242500.000,152500.000,527500.000) # Example bounding box (homolosine) for Ghana
+igh = "+proj=igh +lat_0=0 +lon_0=0 +datum=WGS84 +units=m +no_defs" # proj string for Homolosine projection
+res = 250 
+location = "https://files.isric.org/soilgrids/latest/data/"
+sg_url = f"/vsicurl?max_retry=3&retry_delay=1&list_dir=no&url={location}"
 
+kwargs = {'format': 'GTiff', 'projWin': bb, 'projWinSRS': igh, 'xRes': res, 'yRes': res}
 
-gdal_translate -of VRT -projwin $BOUNDS -tr $CELL_SIZE \
-    -co "TILED=YES" -co "COMPRESS=DEFLATE" -co "PREDICTOR=2" -co "BIGTIFF=YES" \
-    "/vsicurl?max_retry=3&retry_delay=1&list_dir=no&url=https://files.isric.org/soilgrids/latest/data/ocs_0-30cm_mean.vrt" \
-    "ocs_0-5cm_mean.vrt"
+ds = gdal.Translate('./crop_roi_igh_py.vrt', 
+                    '/vsicurl?max_retry=3&retry_delay=1&list_dir=no&url=https://files.isric.org/soilgrids/latest/data/ocs/ocs_0-30cm_mean.vrt', 
+                    **kwargs)
+del ds
 
-gdalwarp -overwrite -t_srs EPSG:4326 -of VRT "ocs_0-5cm_mean.vrt" "ocs_0-5cm_mean_4326.vrt"
+ds = gdal.Warp('./crop_roi_ll_py.vrt', 
+    './crop_roi_igh_py.vrt', 
+    dstSRS='EPSG:4326')
+del ds
 
+kwargs = {'format': 'GTiff', 'creationOptions': ["TILED=YES", "COMPRESS=DEFLATE", "PREDICTOR=2", "BIGTIFF=YES"] }
+ds = gdal.Translate('./crop_roi_ll_py.tif',
+    './crop_roi_ll_py.vrt', 
+    **kwargs)
 
-gdal_translate ocs_0-5cm_mean_4326.vrt ocs_0-5cm_mean_4326.tif \
-    -co "TILED=YES" -co "COMPRESS=DEFLATE" -co "PREDICTOR=2" -co "BIGTIFF=YES"
+del ds

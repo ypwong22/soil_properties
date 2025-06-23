@@ -1,24 +1,19 @@
 """
-Merge the available soil properties data into 1km input ELM friendly format.
+Merge the available soil properties data into 1km input ELM friendly format
+    for the northern domain
+    lon (-119, -64), lat (42, 60)
 
+pH          soil pH
 PCT_CLAY    percent clay                        %
 PCT_SAND    percent sand                        %
 ORGANIC     organic content                     kg/m3
 cfvo        coarse fragments                    % volume
 bd_col      bulk density                        kg/m3
-hksat_col   saturated hydraulic conductivity    mm H2O/s
-watsat_col  saturated water content             m3/m3
 aveDTB      depth to bedrock                    m below surface
 
-Among those, the sources are
-
-- PCT_CLAY, PCT_SAND, bd_col, hksat_col, watsat_col: POLARIS
-- ORGANIC: POLARIS, with cfvo from SoilGrids (gNATSGO is less complete and does not have bd_col)
-- ORGANIC2: SoilGrids (processed by Li et al.)
-- ORGANIC3: gNATSGO, with bd_col from POLARIS and cfvo from SoilGrids
-- cfvo: SoilGrids, the only available source
-- aveDTB: Pelletier et al. (rounded off to the nearest meter)
-- aveDTB2: Global_Soil_Regolith_Sediment_1304 (too deep)
+All from SoilGrids, except:
+- aveDTB: Pelletier et al. 2016 (rounded off to the nearest meter)
+- aveDTB2: SoilGrids (too deep)
 """
 from netCDF4 import Dataset
 import os
@@ -28,6 +23,7 @@ from utils import vert_interp
 import numpy as np
 from scipy.interpolate import RegularGridInterpolator
 import subprocess
+import xarray as xr
 
 
 def get_latlon(tif):
@@ -51,7 +47,7 @@ def get_latlon(tif):
 
 def create_file(lat, lon):
     """ Create the netCDF4 file that will be the repository of data variables """
-    nc_path = os.path.join(path_intrim, 'merged_properties.nc')
+    nc_path = os.path.join(path_intrim, 'merged_properties_na.nc')
 
     with Dataset(nc_path, mode="w", format="NETCDF4") as ds: 
         # ---- dimensions --------------------------------------------------------
@@ -76,8 +72,13 @@ def create_file(lat, lon):
         vsoi[:] = np.arange(1,11)
 
         # ---- global attrs (optional) ------------------------------------------
-        ds.title      = "Soil properties data from multiple sources"
-        ds.source     = "POLARIS: PCT_CLAY, PCT_SAND, bd_col; gNATSGO: ORGANIC, hksat_col, Global_Soil_Regolith_Sediment_1304: aveDTB"
+        ds.title      = "Soil properties data from SoilGrids"
+        ds.source     = \
+            "- pH, PCT_CLAY, PCT_SAND, ORGANIC, cfvo, bd_col, avgDTB: SoilGrids\n" + \
+            "- aveDTB: Pelletier et al. 2016 (rounded off to the nearest meter)\n" + \
+            "- aveDTB2: Global_Soil_Regolith_Sediment_1304 (too deep)\n\n" + \
+            "Pelletier, J.D., P.D. Broxton, P. Hazenberg, X. Zeng, P.A. Troch, G. Niu, Z.C. Williams, M.A. Brunke, and D. Gochis. 2016. Global 1-km Gridded Thickness of Soil, Regolith, and Sedimentary Deposit Layers. ORNL DAAC, Oak Ridge, Tennessee, USA. http://dx.doi.org/10.3334/ORNLDAAC/1304" + \
+            "Li, L., Bisht, G., Hao, D., and Leung, L. R.: Global 1 km land surface parameters for kilometer-scale Earth system modeling, Earth Syst. Sci. Data, 16, 2007-2032, https://doi.org/10.5194/essd-16-2007-2024, 2024."
         ds.geodetic_datum = "EPSG:4326 (WGS84)"
 
     return
@@ -93,7 +94,7 @@ def append_layer(data, var_name, fill_value=-9999.0, **attrs):
       - **attrs  : any keyword=value pairs you want stored as the data variable's attributes
                    e.g. long name, units, 
     """
-    nc_path = os.path.join(path_intrim, 'merged_properties.nc')
+    nc_path = os.path.join(path_intrim, 'merged_properties_na.nc')
 
     with Dataset(nc_path, mode="a") as ds:
         if var_name not in ds.variables:
@@ -119,12 +120,14 @@ def append_layer(data, var_name, fill_value=-9999.0, **attrs):
             v[:, :, :] = np.ma.masked_invalid(data)
         else:
             v[:, :] = np.ma.masked_invalid(data)
+        
+        ds.sync()
 
     return
 
 
 def vert_interp_elm(data):
-    """ helper function to interpolate POLARIS & SoilGrids data
+    """ helper function to interpolate SoilGrids data to
         [layer, lat, lon] into elm layers. The two are on the same vertical grids.
     """
     # Reshape into [latxlon, layer] to facilitate interpolation
@@ -145,145 +148,45 @@ def vert_interp_elm(data):
     return output_data
 
 
-
-def read_cfvo(lat, lon):
-    """ Read the coarse fragments (%) from SoilGrids because it is necessary to calculate organic matter content """
-
-    # Spatial interpolation to POLARIS grid
-    data = np.full([6, len(lat), len(lon)], np.nan)
-    lon2d, lat2d = np.meshgrid(lon, lat)
-    for i, layer in enumerate(['0-5cm','5-15cm','15-30cm','30-60cm','60-100cm','100-200cm']):
-        filename = os.path.join(path_data, 'SoilGrids', f'cfvo_{layer}_mean.tif')
-        lat_, lon_ = get_latlon(filename)
-        with rio.open(filename) as h:
-            temp = h.read(1, masked = True)
-            # the original GEE data is scaled up by 10
-            temp = np.where(temp.mask, np.nan, temp.data / 10)
-
-        lon2d, lat2d = np.meshgrid(lon, lat)
-
-        f = RegularGridInterpolator((lat_ ,lon_), temp, 
-                                    method = 'nearest', bounds_error=False,
-                                    fill_value = np.nan)
-        data[i,:,:] = f(np.column_stack([lat2d.ravel(), lon2d.ravel()])).reshape(lat2d.shape)
-
-    # Vertical interpolation to ELM layers
-    output_data = vert_interp_elm(data)
-
-    return output_data
-
-
-
-def read_polaris(varname, cfvo = None):
-    """ helper to read a polaris geotiff """
-
-    if varname == 'ORGANIC':
-        try:
-            assert (not cfvo is None)
-        except:
-            raise ValueError('Must input coarse fragments for ORGANIC calculation')
-
+def read_soilgrids(varname):
+    """ helper to read a SoilGrids geotiff 
+    https://gee-community-catalog.org/projects/isric/#citation
+    """
     # Map varname to filename
-    if varname == 'PCT_CLAY':
-        filename = os.path.join(path_data, 'POLARIS', f'polaris_clay_1km.tif')
+    if varname == 'pH':
+        ff = 'phh2o'
+    elif varname == 'PCT_CLAY':
+        ff = 'clay'
     elif varname == 'PCT_SAND':
-        filename = os.path.join(path_data, 'POLARIS', f'polaris_sand_1km.tif')
-    elif varname == 'bd_col':
-        filename = os.path.join(path_data, 'POLARIS', f'polaris_bd_1km.tif')
+        ff = 'sand'
     elif varname == 'ORGANIC':
-        filename = os.path.join(path_data, 'POLARIS', f'polaris_om_1km.tif')
-    elif varname == 'hksat_col':
-        filename = os.path.join(path_data, 'POLARIS', f'polaris_ksat_1km.tif')        
-    elif varname == 'watsat_col':
-        filename = os.path.join(path_data, 'POLARIS', f'polaris_theta_s_1km.tif')        
+        ff = 'soc'
+    elif varname == 'cfvo':
+        ff = 'cfvo'
+    elif varname == 'bd_col':
+        ff = 'bdod'
     else:
         raise Exception('Not implemented')
 
-    # Read the data array in [layer, lat, lon]
-    with rio.open(filename) as h:
-        data = h.read()
+    data = np.full([6, len(lat), len(lon)], np.nan)
+    for i, layer in enumerate(['0-5cm','5-15cm','15-30cm','30-60cm','60-100cm','100-200cm']):
+        filename = os.path.join(path_data, 'SoilGrids', f'na_{ff}_{layer}.tif')
+        with rio.open(filename) as h:
+            temp = h.read(1, masked = True)
+            data[i,:,:] = np.where(temp.mask, np.nan, temp.data)
+            if varname in ['pH', 'cfvo','PCT_CLAY','PCT_SAND','ORGANIC']:
+                # the original GEE data is scaled up by 10
+                data[i,:,:] = data[i,:,:] / 10
+            elif varname == 'bd_col':
+                # the original GEE data is scaled up by 100
+                data[i,:,:] = data[i,:,:] / 100 * 1e3 # kg/dm3 => kg/m3
 
-    output_data = vert_interp_elm(data)
-
-    if varname == 'bd_col':
-        # g/cm3 => kg/m3
-        output_data *= 1e3
-    elif varname == 'ORGANIC':
-        # % weight * dry soil bulk density = kg/m3
-        output_data = (output_data / 100) * read_polaris('bd_col') * (1 - cfvo/100)
-    elif varname == 'hksat_col':
-        # cm/hr => mm/s
-        output_data *= (10/3600)
-
-    return output_data
-
-
-def read_organic2(lat, lon):
-    """ Read SoilGrids organic matter from Lingcheng Li's 1km dataset
-
-        Li, L., Bisht, G., Hao, D., and Leung, L. R.: Global 1 km land surface parameters for kilometer-scale Earth system modeling, Earth Syst. Sci. Data, 16, 2007-2032, https://doi.org/10.5194/essd-16-2007-2024, 2024.
-    """
-    with Dataset(os.path.join(path_data, 'global_cf_float', 'ORGANIC_10layer_1k_c230606.nc')) as nc:
-        lat_ = nc['lat'][:].data
-        filt_y = (lat_ >= np.min(lat)) & (lat_ <= np.max(lat))
-
-        lon_ = nc['lon'][:].data
-        filt_x = (lon_ >= lon[0]) & (lon_ <= lon[-1])
-
-        lat_ = lat_[filt_y][::-1]
-        lon_ = lon_[filt_x]
-
-        organic = nc['ORGANIC'][:, filt_y, filt_x][:, ::-1, :]
-        organic = np.where(organic.mask, np.nan, organic.data)
-
-    lon2d, lat2d = np.meshgrid(lon, lat)
-    data = np.full([10, len(lat), len(lon)], np.nan)
-    for i in range(10):
-        f = RegularGridInterpolator((lat_ ,lon_), organic[i,:,:], 
-                                    method = 'nearest', bounds_error=False,
-                                    fill_value = np.nan)
-        data[i,:,:] = f(np.column_stack([lat2d.ravel(), lon2d.ravel()])).reshape(lat2d.shape)
-    return data
-
-
-def read_gNATSGO(varname, lat, lon, cfvo = None):
-    """ Read gNATSGO soil organic matter netcdf and resample by nearest neighbor
-        to the POLARIS 1km grid. 
-    """
-    if varname == 'ORGANIC':
-        try:
-            assert (not cfvo is None)
-        except:
-            raise ValueError('Must input coarse fragments for ORGANIC calculation')
+    # Vertical interpolation to ELM layers
+    data = vert_interp_elm(data)
 
     if varname == 'ORGANIC':
-        ff = 'om'
-    elif varname == 'cfvo':
-        ff = 'fragvol'
-
-    data = np.full([10, len(lat), len(lon)], np.nan)
-
-    lon2d, lat2d = np.meshgrid(lon, lat)
-    for i in range(1, 11):
-        with Dataset(os.path.join(path_intrim, 'gNATSGO', f'{ff}_r_{i}.nc')) as nc:
-            lat_old = nc['lat'][:].data
-            lon_old = nc['lon'][:].data
-            temp = np.where(nc['Band1'][:,:].mask, np.nan, nc['Band1'][:, :].data)
-
-            f = RegularGridInterpolator((lat_old, lon_old), temp, 
-                                        method = 'nearest', bounds_error=False,
-                                        fill_value = np.nan)
-            data[i-1, :, :] = f(np.column_stack([lat2d.ravel(), 
-                                                 lon2d.ravel()])).reshape(lat2d.shape)
-    
-    if varname == 'ORGANIC':
-        # convert from % to kg/m3
-        
-        ##cfvo = read_gNATSGO('cfvo', lat, lon)
-        ##cfvo2 = read_cfvo(lat, lon)
-        ##cfvo = np.where(~((cfvo >= 0) & (cfvo <= 100)), cfvo2, cfvo)
-
-        data = data / 100 * read_polaris('bd_col') * (1 - cfvo/100)
+        # g/kg * dry soil bulk density = kg/m3
+        data = data / 1e3 * read_soilgrids('bd_col') * (1-read_soilgrids('cfvo')/100)
 
     return data
 
@@ -313,8 +216,8 @@ def read_aveDTB(lat, lon):
 
         # subset to CONUS region
         subprocess.run(
-            ["gdal_translate", "-projwin", "-125.82", "49.5", "-66.17", "24.4",
-            "-co", "COMPRESS=LZW", src, out],
+            ["gdal_translate", "-projwin", "-119", "60", "-64", "42",
+             "-co", "COMPRESS=LZW", src, out],
             check=True
         )
 
@@ -337,40 +240,32 @@ def read_aveDTB(lat, lon):
 
 
 if __name__ == '__main__':
-    tif = os.path.join(path_data, 'POLARIS', 'polaris_clay_1km.tif')
+    tif = os.path.join(path_data, 'SoilGrids', 'na_phh2o_0-5cm.tif')
     lat, lon = get_latlon(tif)
     create_file(lat, lon)
 
-    data = read_polaris('PCT_CLAY')
+    data = read_soilgrids('pH')
+    append_layer(data, 'pH', -9999.0, 
+                 long_name = 'Soil pH', units = '')
+
+    data = read_soilgrids('PCT_CLAY')
     append_layer(data, 'PCT_CLAY', -9999.0, 
                  long_name = 'percentage clay content', units = '%')
 
-    data = read_polaris('PCT_SAND')
+    data = read_soilgrids('PCT_SAND')
     append_layer(data, 'PCT_SAND', -9999.0, 
                  long_name = 'percentage sand content', units = '%')
 
-    data = read_polaris('bd_col')
+    data = read_soilgrids('bd_col')
     append_layer(data, 'bd_col', -9999.0, 
                  long_name = 'bulk density', units = 'kg/m3')
     
-    cfvo = read_cfvo(lat, lon)
+    cfvo = read_soilgrids('cfvo')
     append_layer(cfvo, 'cfvo', -9999.0, 
                  long_name = 'volume fraction of coarse fragments', units = '%')
 
-    data = read_polaris('hksat_col')
-    append_layer(data, 'hksat_col', -9999.0, 
-                 long_name = 'saturated hydraulic conductivity', units = 'mm H2O/s')
-
-    data = read_polaris('ORGANIC', cfvo)
+    data = read_soilgrids('ORGANIC')
     append_layer(data, 'ORGANIC', -9999.0, 
-                 long_name = 'organic matter content', units = 'kg/m3')
-
-    data = read_organic2(lat,lon)
-    append_layer(data, 'ORGANIC2', -9999.0, 
-                 long_name = 'organic matter content from Li et al.', units = 'kg/m3')
-
-    data = read_gNATSGO('ORGANIC', lat, lon, cfvo)
-    append_layer(data, 'ORGANIC3', -9999.0, 
                  long_name = 'organic matter content', units = 'kg/m3')
 
     data_interp = read_aveDTB(lat, lon)
@@ -378,3 +273,13 @@ if __name__ == '__main__':
                  long_name = 'soil thickness from Pelletier et al.', units = 'm')
     append_layer(data_interp[1], 'aveDTB2', -9999.0,
                  long_name = 'soil thickness from SoilGrids', unit = 'm')
+    
+    # Subset to lon (-119, -64), lat (42, 60)
+    nc_path = os.path.join(path_intrim, 'merged_properties_na.nc')
+    os.system(f'cp {nc_path} {nc_path}_bak')
+    hr = xr.open_dataset(f'{nc_path}_bak')
+    hr_sub = hr.sel({'lat': slice(61, 41)})
+    hr_sub.to_netcdf(nc_path, mode="w")
+    hr.close()
+
+    os.system(f'rm {nc_path}_bak')
