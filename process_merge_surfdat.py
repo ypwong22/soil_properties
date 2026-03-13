@@ -8,6 +8,7 @@ ORGANIC     organic content                     kg/m3
 cfvo        coarse fragments                    % volume
 bd_col      bulk density                        kg/m3
 aveDTB      depth to bedrock                    m below surface
+SOIL_ORDER  USDA soil order                     1-15
 
 All from SoilGrids, except:
 - aveDTB: Pelletier et al. 2016 (rounded off to the nearest meter)
@@ -20,6 +21,7 @@ from constants import *
 from utils import vert_interp
 import numpy as np
 from scipy.interpolate import RegularGridInterpolator
+from scipy.spatial import cKDTree
 import subprocess
 import xarray as xr
 import matplotlib.pyplot as plt
@@ -63,7 +65,7 @@ def get_nn_indices(ref_axis, target_axis):
         ref_sorted = ref_axis[sorter]
     else: # Ascending
         sorter = np.arange(len(ref_axis))
-        ref_sorted = ref_axis
+        ref_sorted = ref_axis 
 
     # each value in the target_axis, i.e. target_axis[i],
     # can be inserted between ref_sorted[idx[i]-1] and
@@ -136,8 +138,24 @@ def read_soilgrids(varname, target_lat, target_lon):
             temp = h.read(1, window=window, masked=True)
             
             # Extract points using local indices
-            vals = temp[ilat - lat_min, ilon - lon_min]
-            data[i,:] = np.where(np.ma.getmaskarray(vals), np.nan, vals)
+            vals = np.ma.filled(
+                temp[ilat - lat_min, ilon - lon_min].astype(float), np.nan
+            )  # shape: (nlayer, npoints)
+            data[i,:] = vals
+
+            # Per-fill masked target points from nearest valid target point
+            layer_mask = np.isnan(data[i,:])
+            if layer_mask.any():
+                valid_pts = np.where(~layer_mask)[0]
+                if len(valid_pts) > 0:
+                    tree = cKDTree(np.column_stack(
+                        [target_lat[valid_pts], target_lon[valid_pts]]
+                    ))
+                    masked_pts = np.where(layer_mask)[0]
+                    _, nn = tree.query(np.column_stack(
+                        [target_lat[masked_pts], target_lon[masked_pts]]
+                    ))
+                    data[i, masked_pts] = data[i, valid_pts[nn]]
 
             if varname in ['pH', 'cfvo','PCT_CLAY','PCT_SAND','ORGANIC']:
                 # the original GEE data is scaled up by 10
@@ -158,6 +176,52 @@ def read_soilgrids(varname, target_lat, target_lon):
     return data
 
 
+def read_soilorder(target_lat, target_lon):
+    filename_ref = os.path.join(path_data, 'Soil_Order_NA_1km.tif')
+    src_lat, src_lon = get_tif_coords(filename_ref)
+
+    # Find nearest neighbor indices
+    ilat = get_nn_indices(src_lat, target_lat)
+    ilon = get_nn_indices(src_lon, target_lon)
+    
+    # Optimization: Read only the bounding box
+    lat_min, lat_max = ilat.min(), ilat.max()
+    lon_min, lon_max = ilon.min(), ilon.max()
+
+    data = np.full(len(target_lat), np.nan)
+
+    filename = os.path.join(path_data, 'Soil_Order_NA_1km.tif')
+    with rio.open(filename) as h:
+        window = rio.windows.Window(lon_min, lat_min,
+                                    lon_max - lon_min + 1,
+                                    lat_max - lat_min + 1)
+        temp = h.read(1, window=window, masked=True)
+
+        # Extract points using local indices
+        vals = np.ma.filled(
+            temp[ilat - lat_min, ilon - lon_min].astype(float), np.nan
+        )  # shape: (nlayer, npoints)
+        data[:] = vals
+
+        # Per-fill masked target points from nearest valid target point
+        layer_mask = np.isnan(data)
+        if layer_mask.any():
+            valid_pts = np.where(~layer_mask)[0]
+            if len(valid_pts) > 0:
+                tree = cKDTree(np.column_stack(
+                    [target_lat[valid_pts], target_lon[valid_pts]]
+                ))
+                masked_pts = np.where(layer_mask)[0]
+                _, nn = tree.query(np.column_stack(
+                    [target_lat[masked_pts], target_lon[masked_pts]]
+                ))
+                data[masked_pts] = data[valid_pts[nn]]
+
+    data = data.astype(int)
+
+    return data
+
+
 def read_1km(varname, target_lat, target_lon):
     """ helper to read 1 variable from source file
     """
@@ -166,7 +230,7 @@ def read_1km(varname, target_lat, target_lon):
         filename = f'{varname}_10layer_1k_c230606.nc'
     else:
         filename = f'{varname}_1k_c230606.nc'
-    
+
     with Dataset(os.path.join(path_src, filename), mode="r", format="NETCDF4") as ds:
         lat = ds['lat'][:]
         lon = ds['lon'][:]
@@ -185,10 +249,41 @@ def read_1km(varname, target_lat, target_lon):
         # dimension: (lat, lon) or (layer, lat, lon)
         if ds[varname].ndim == 3:
             data_sub = ds[varname][:, lat_slice, lon_slice]
-            data = data_sub[:, ilat - lat_min, ilon - lon_min]
+            data = np.ma.filled(
+                data_sub[:, ilat - lat_min, ilon - lon_min].astype(float), np.nan
+            )  # shape: (nlayer, npoints)
+            # Per-layer: fill masked target points from nearest valid target point
+            for k in range(data.shape[0]):
+                layer_mask = np.isnan(data[k])
+                if layer_mask.any():
+                    valid_pts = np.where(~layer_mask)[0]
+                    if len(valid_pts) > 0:
+                        tree = cKDTree(np.column_stack(
+                            [target_lat[valid_pts], target_lon[valid_pts]]
+                        ))
+                        masked_pts = np.where(layer_mask)[0]
+                        _, nn = tree.query(np.column_stack(
+                            [target_lat[masked_pts], target_lon[masked_pts]]
+                        ))
+                        data[k, masked_pts] = data[k, valid_pts[nn]]
         else:
             data_sub = ds[varname][lat_slice, lon_slice]
-            data = data_sub[ilat - lat_min, ilon - lon_min]
+            data = np.ma.filled(
+                data_sub[ilat - lat_min, ilon - lon_min].astype(float), np.nan
+            )  # shape: (npoints,)
+            # Fill masked target points from nearest valid target point
+            pt_mask = np.isnan(data)
+            if pt_mask.any():
+                valid_pts = np.where(~pt_mask)[0]
+                if len(valid_pts) > 0:
+                    tree = cKDTree(np.column_stack(
+                        [target_lat[valid_pts], target_lon[valid_pts]]
+                    ))
+                    masked_pts = np.where(pt_mask)[0]
+                    _, nn = tree.query(np.column_stack(
+                        [target_lat[masked_pts], target_lon[masked_pts]]
+                    ))
+                    data[masked_pts] = data[valid_pts[nn]]
 
     return data
 
@@ -314,6 +409,20 @@ def check_plot(varname, data_new, lat_new, lon_new):
                 else:
                     ax[n,0].text(0.5, 0.5, "No corresponding source layer", 
                                  transform=ax[n,0].transAxes, ha='center')
+        elif varname == 'SOIL_ORDER':
+            fpath = os.path.join(path_data, f'Soil_Order_NA_1km.tif')
+            if os.path.exists(fpath):
+                with rio.open(fpath) as src:
+                    window = rio.windows.from_bounds(lon_new.min(), lat_new.min(), 
+                                                     lon_new.max(), lat_new.max(), src.transform)
+                    data_orig = src.read(1, window=window, masked=True)
+                    bounds = src.window_bounds(window)
+                    extent = [bounds[0], bounds[2], bounds[1], bounds[3]]
+                    im = ax[n,0].imshow(data_orig, extent=extent, origin='upper', cmap='viridis', 
+                                        transform=ccrs.PlateCarree(), vmin=vmin, vmax=vmax)
+                    ax[n,0].set_title(f"Original 1km (SOIL_ORDER)")
+                    plt.colorbar(im, ax=ax[n,0], fraction=0.046, pad=0.04)
+                    ax[n,0].coastlines()
 
     except Exception as e:
         print(f"Could not plot original data for {varname}: {e}")
@@ -338,6 +447,7 @@ if __name__ == '__main__':
 
         # 'ASPECT', 'CANOPY_HEIGHT_BOT', 'CANOPY_HEIGHT_TOP', 'SKY_VIEW_FACTOR', 'TERRAIN_CONFIG'
         for var in ['ELEVATION', 'ORGANIC', 'PCT_CLAY', 'PCT_SAND', 'SLOPE', 'STDEV_ELEV']:
+        #for var in ['PCT_SAND']:
             if var == 'STDEV_ELEV':
                 var_ = 'STD_ELEV'
             elif var == 'ELEVATION':
@@ -357,4 +467,8 @@ if __name__ == '__main__':
     check_plot('pH', data, gridlat, gridlon)
     append_layer(data, 'pH', -9999.0, 
                  long_name = 'Soil pH', units = '')
-    
+
+    data = read_soilorder(gridlat, gridlon)
+    check_plot('SOIL_ORDER', data, gridlat, gridlon)
+    append_layer(data, 'SOIL_ORDER', -9999, 
+                 long_name = 'SOIL_ORDER', units = '')
